@@ -17,6 +17,44 @@ class State(Enum):
     HITS = 10
     SELECTED_HITS = 11
 
+class Hit:
+
+    def __init__(self, det_line, floor, det_ori_elev, det_ori_az, det_pos_x, det_pos_y, det_pos_z, det_time, det_amp):
+        self._order = 0
+        self._det_line = det_line
+        self._floor = floor
+        self._det_ori_elev = det_ori_elev
+        self._det_ori_az = det_ori_az
+        self._det_pos_x = det_pos_x
+        self._det_pos_y = det_pos_y
+        self._det_pos_z = det_pos_z
+        self._det_time = det_time
+        self._det_amp = det_amp
+
+    def convert_to_relative_time(self, hit_0):
+        self._det_time = self._det_time - hit_0._det_time
+
+    def convert_to_relative_amplitude(self, hit_0):
+        if hit_0._det_amp != 0:
+            self._det_amp = self._det_amp / hit_0._det_amp
+
+    def set_order(self, order):
+        self._order = order
+
+    def flatten(self):
+        ret_array = {}
+        ret_array[str(self._order) + "_det_line"] = self._det_line
+        ret_array[str(self._order) + "_floor"] = self._floor
+        #ret_array[str(self._order) + "_det_ori_elev"] = self._det_ori_elev
+        ret_array[str(self._order) + "_det_ori_az"] = self._det_ori_az
+        ret_array[str(self._order) + "_det_pos_x"] = self._det_pos_x
+        ret_array[str(self._order) + "_det_pos_y"] = self._det_pos_y
+        ret_array[str(self._order) + "_det_pos_z"] = self._det_pos_z
+        ret_array[str(self._order) + "_det_time"] = self._det_time
+        ret_array[str(self._order) + "_det_amp"] = self._det_amp
+
+        return ret_array
+
 class DataRetriever:
 
     def __init__(self, path, file_number):
@@ -25,10 +63,13 @@ class DataRetriever:
         self.__get_sel_events = True
         self.__filter_bbfit_null = True
         self.__get_det_type = True
+        self.__stand_event_amplitude = False
         self.__selected_hits = 5
         self.__current_event = {}
         self.__df_list = []
         self.__target_keys = []
+        self.__hit_list = []
+        self.__compare_df = []
         self.__current_state = State.EVENT_ID
         self.__state_dict = {
             State.EVENT_ID: self.event_id,
@@ -50,8 +91,9 @@ class DataRetriever:
     def set_target(self, target_keys):
         self.__target_keys = target_keys
 
-    def set_selected_hits(self, selected_hits):
+    def set_selected_hits(self, selected_hits, stand_event_amplitude = False):
         self.__selected_hits = selected_hits
+        self.__stand_event_amplitude = stand_event_amplitude
 
     def load_data (self, get_sel_events = True, filter_bbfit_null = True, get_bbfit_data = True, get_aafit_data = True):
         pathlist = Path(self.__basepath).glob('*.txt')
@@ -82,9 +124,10 @@ class DataRetriever:
         self.__final_df = pd.DataFrame(self.__df_list)
         self.__target = self.__final_df[self.__target_keys]
         self.__data_df = self.__final_df.drop(['m_elev', 'm_az', 'event_id', 'run_id', 'date', 'time', 'm_energy', 'm_pos_x', 'm_pos_y', 'm_pos_z',
-                   'm_dir_x', 'm_dir_y', 'm_dir_z', 'frame_id'], axis=1)
+                   'm_dir_x', 'm_dir_y', 'm_dir_z', 'frame_id', 'trigger_counter'], axis=1)
         
-        self.__compare_df = self.__data_df[['bbfit_elev','bbfit_az']]
+        if self.__get_bbfit_data:
+            self.__compare_df = self.__data_df[['bbfit_elev','bbfit_az']]
         
         if self.__get_bbfit_data == False:
             self.__data_df = self.__data_df.drop(['bbfit_elev', 'bbfit_az', 'bbfit_chi2'], axis=1, errors='ignore')
@@ -128,7 +171,7 @@ class DataRetriever:
         y = float(y)
         z = float(z)
         XsqPlusYsq = x**2 + y**2
-        r = m.sqrt(XsqPlusYsq + z**2)               # r
+        #r = m.sqrt(XsqPlusYsq + z**2)               # r
         elev = m.atan2(z,m.sqrt(XsqPlusYsq))     # theta
         az = m.atan2(y,x)                           # phi
         return elev, az
@@ -235,30 +278,35 @@ class DataRetriever:
         if self.__get_sel_events and len(element_list) == 14 and element_list[0] == "hit": 
             self.__current_state = State.SELECTED_HITS
             if int(element_list[1]) < (self.__selected_hits + 1):
-                self.__current_event["hit_counter"] = int(element_list[1])
-                #print(self.__current_event["hit_counter"])
-                self.__current_event["det_line_" + str(self.__current_event["hit_counter"])] = int(element_list[2])
-                self.__current_event["floor_" + str(self.__current_event["hit_counter"])] = int(element_list[3])
-            #   self.__current_event["opt_module_" + str(self.__current_event["hit_counter"])] = element_list[4]
-                self.__current_event["det_ori_elev" + str(self.__current_event["hit_counter"])], self.__current_event["det_ori_az" + str(self.__current_event["hit_counter"])] = self.cart2sph(float(element_list[8]), float(element_list[9]), float(element_list[10]))
-                self.__current_event["det_pos_x_" + str(self.__current_event["hit_counter"])] = float(element_list[5])
-                self.__current_event["det_pos_y_" + str(self.__current_event["hit_counter"])] = float(element_list[6])
-                self.__current_event["det_pos_z_" + str(self.__current_event["hit_counter"])] = float(element_list[7])
-                #self.__current_event["det_ori_x_" + str(self.__current_event["hit_counter"])] = float(element_list[8])
-                #self.__current_event["det_ori_y_" + str(self.__current_event["hit_counter"])] = float(element_list[9])
-                #self.__current_event["det_ori_z_" + str(self.__current_event["hit_counter"])] = float(element_list[10])
-                self.__current_event["det_time_" + str(self.__current_event["hit_counter"])] = float(element_list[11])
-                self.__current_event["det_amp_" + str(self.__current_event["hit_counter"])] = float(element_list[12])
-                #self.__current_event["det_hit_freq_" + str(self.__current_event["hit_counter"])] = float(element_list[13])
+                elev, az = self.cart2sph(float(element_list[8]), float(element_list[9]), float(element_list[10]))
+                self.__hit_list.append(Hit(int(element_list[2]), int(element_list[3]), elev, az, float(element_list[5]), float(element_list[6]), float(element_list[7]), float(element_list[11]), float(element_list[12])))
+
         elif "end_event" in line:
             self.__current_state = State.EVENT_ID
-            if not self.__get_sel_events or self.__current_event["hit_counter"] == self.__selected_hits:
+
+            if not self.__get_sel_events or len(self.__hit_list) == self.__selected_hits:
+
+                if self.__stand_event_amplitude:
+                    max_amp_hit = max(self.__hit_list, key=lambda item: item._det_amp)
+                    for hit_obj in self.__hit_list:
+                        hit_obj.convert_to_relative_amplitude(max_amp_hit)
+
+                self.__hit_list.sort(key=lambda x: x._det_time)
+                for index, hit_obj in reversed(list(enumerate(self.__hit_list))):
+                    hit_obj.convert_to_relative_time(self.__hit_list[0])
+                    hit_obj.set_order(index + 1)
+
+                for hit_obj in self.__hit_list:
+                    self.__current_event.update(hit_obj.flatten())
+
                 temp_event = self.__current_event.copy()
                 self.__df_list.append(temp_event)
-                
+
                 if self.__get_det_type:
                     self.__current_event['det_type'] = temp_event['det_type']
             
+            self.__hit_list.clear()
+
             #print("END EVENT: " + self.__current_event["event_id"])
         elif self.__get_sel_events:
             print("ERROR IN STATE: SELECTED_HITS")
